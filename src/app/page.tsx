@@ -1,103 +1,191 @@
-import Image from "next/image";
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import Tesseract from 'tesseract.js';
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [plateText, setPlateText] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [lastCapture, setLastCapture] = useState<string | null>(null);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  useEffect(() => {
+    // Ask for camera access
+    navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: 'environment' } })
+      .then((stream) => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+      })
+      .catch((err) => {
+        console.error('Error accessing camera: ', err);
+        setError('Unable to access camera. Please ensure you have granted camera permissions.');
+      });
+  }, []);
+
+  const captureImage = () => {
+    const canvas = canvasRef.current;
+    const video = videoRef.current;
+
+    if (canvas && video) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        recognizeText(canvas);
+      }
+    }
+  };
+
+  // Function to validate if the detected text looks like a number plate
+  const isValidPlateNumber = (text: string): boolean => {
+    // Remove all non-alphanumeric characters except hyphens
+    const cleaned = text.replace(/[^A-Z0-9\-]/gi, '');
+    
+    // Check if it has a reasonable length (3-12 characters)
+    if (cleaned.length < 3 || cleaned.length > 12) {
+      return false;
+    }
+    
+    // Check if it contains at least one letter and one number
+    const hasLetter = /[A-Z]/i.test(cleaned);
+    const hasNumber = /[0-9]/.test(cleaned);
+    
+    if (!hasLetter || !hasNumber) {
+      return false;
+    }
+    
+    // Check for common patterns (at least 2 consecutive letters or numbers)
+    const hasConsecutiveLetters = /[A-Z]{2,}/i.test(cleaned);
+    const hasConsecutiveNumbers = /[0-9]{2,}/.test(cleaned);
+    
+    return hasConsecutiveLetters || hasConsecutiveNumbers;
+  };
+
+  const recognizeText = async (canvas: HTMLCanvasElement) => {
+    setLoading(true);
+    setError('');
+    setPlateText('');
+    
+    try {
+      const dataUrl = canvas.toDataURL('image/png');
+      setLastCapture(dataUrl);
+      
+      const { data } = await Tesseract.recognize(dataUrl, 'eng', {
+        logger: (m) => console.log(m),
+      });
+
+      console.log('Raw OCR result:', data.text);
+      console.log('Confidence:', data.confidence);
+
+      // Clean the text to extract only alphanumeric characters and common plate separators
+      const cleaned = data.text.replace(/[^A-Z0-9\-]/gi, '').toUpperCase();
+      
+      // Check if the result is valid and has reasonable confidence
+      if (data.confidence < 30) {
+        setError('Low confidence in text recognition. Please ensure the number plate is clear and well-lit.');
+        return;
+      }
+
+      if (!isValidPlateNumber(cleaned)) {
+        setError('No valid number plate detected. Please ensure you are pointing the camera at a clear number plate.');
+        return;
+      }
+
+      setPlateText(cleaned);
+    } catch (err) {
+      console.error('OCR Error:', err);
+      setError('Failed to recognize text. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <main className="min-h-screen bg-gray-50 p-4">
+      <div className="max-w-2xl mx-auto">
+        <h1 className="text-3xl font-bold text-center mb-8 text-gray-800">
+          Number Plate OCR Scanner
+        </h1>
+        
+        {error && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+            {error}
+          </div>
+        )}
+
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+          <video 
+            ref={videoRef} 
+            autoPlay 
+            playsInline 
+            className="w-full max-w-md mx-auto rounded-lg border-2 border-gray-300"
+          />
+          
+          <canvas 
+            ref={canvasRef} 
+            style={{ display: 'none' }} 
+          />
+          
+          <div className="text-center mt-4">
+            <button 
+              onClick={captureImage} 
+              disabled={loading}
+              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-bold py-3 px-6 rounded-lg transition-colors duration-200"
+            >
+              {loading ? 'Scanning...' : 'Capture & Read Plate'}
+            </button>
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
+
+        {lastCapture && (
+          <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+            <h3 className="text-lg font-semibold mb-3">Last Captured Image:</h3>
+            <img 
+              src={lastCapture} 
+              alt="Captured frame" 
+              className="w-full max-w-md mx-auto rounded-lg border border-gray-300"
+            />
+          </div>
+        )}
+
+        <div className="bg-white rounded-lg shadow-lg p-6">
+          <label htmlFor="plate" className="block text-sm font-medium text-gray-700 mb-2">
+            Detected Plate Number:
+          </label>
+          <input
+            id="plate"
+            type="text"
+            value={plateText}
+            readOnly
+            className="w-full px-4 py-3 text-lg font-mono border border-gray-300 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="Plate number will appear here..."
           />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+          
+          {plateText && (
+            <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+              <p className="text-sm text-green-700">
+                <strong>Valid Plate Detected:</strong> {plateText}
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-8 text-center text-sm text-gray-600">
+          <p className="font-semibold mb-2">Tips for best results:</p>
+          <ul className="text-left max-w-md mx-auto space-y-1">
+            <li>• Point camera directly at the number plate</li>
+            <li>• Ensure good lighting and no glare</li>
+            <li>• Keep camera steady and close to the plate</li>
+            <li>• Avoid shadows or reflections on the plate</li>
+          </ul>
+          <p className="mt-4">Camera access requires HTTPS or localhost.</p>
+        </div>
+      </div>
+    </main>
   );
 }
