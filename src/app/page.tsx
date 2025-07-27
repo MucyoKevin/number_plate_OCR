@@ -46,8 +46,8 @@ export default function Home() {
     // Remove all non-alphanumeric characters except hyphens
     const cleaned = text.replace(/[^A-Z0-9\-]/gi, '');
     
-    // Check if it has a reasonable length (3-12 characters)
-    if (cleaned.length < 3 || cleaned.length > 12) {
+    // Check if it has a reasonable length (3-10 characters)
+    if (cleaned.length < 3 || cleaned.length > 10) {
       return false;
     }
     
@@ -59,11 +59,15 @@ export default function Home() {
       return false;
     }
     
-    // Check for common patterns (at least 2 consecutive letters or numbers)
-    const hasConsecutiveLetters = /[A-Z]{2,}/i.test(cleaned);
-    const hasConsecutiveNumbers = /[0-9]{2,}/.test(cleaned);
+    // More flexible pattern matching for various plate formats
+    // Accept if it has reasonable letter/number combinations
+    const letterCount = (cleaned.match(/[A-Z]/gi) || []).length;
+    const numberCount = (cleaned.match(/[0-9]/g) || []).length;
     
-    return hasConsecutiveLetters || hasConsecutiveNumbers;
+    // Should have at least 2 letters and 2 numbers, or similar combinations
+    return (letterCount >= 2 && numberCount >= 2) || 
+           (letterCount >= 3 && numberCount >= 1) || 
+           (letterCount >= 1 && numberCount >= 3);
   };
 
   const recognizeText = async (canvas: HTMLCanvasElement) => {
@@ -85,9 +89,15 @@ export default function Home() {
       // Clean the text to extract only alphanumeric characters and common plate separators
       const cleaned = data.text.replace(/[^A-Z0-9\-]/gi, '').toUpperCase();
       
-      // Check if the result is valid and has reasonable confidence
-      if (data.confidence < 30) {
+      // Lowered confidence threshold for better recognition
+      if (data.confidence < 15) {
         setError('Low confidence in text recognition. Please ensure the number plate is clear and well-lit.');
+        return;
+      }
+
+      // If confidence is low but we have some text, try to validate it anyway
+      if (data.confidence < 30 && cleaned.length < 4) {
+        setError('Unclear image. Please try again with better lighting or move closer to the plate.');
         return;
       }
 
